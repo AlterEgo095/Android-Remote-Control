@@ -1,0 +1,17 @@
+# Android Remote Control — démarrage rapide (SQLite, sans dépendance externe)
+# Production VPS conforme aux décisions d'architecture : voir docker-compose.vps.yml
+
+services:
+  console:
+    build: .
+    container_name: arc-console
+    environment:
+      DATABASE_URL: file:/app/db/custom.db
+    ports:
+      - "3000:3000"
+    volumes:
+      - arc-db:/app/db
+    restart: unless-stopped
+
+volumes:
+  arc-db:

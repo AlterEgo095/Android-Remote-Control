@@ -1,0 +1,82 @@
+# Android Remote Control — cible VPS Ubuntu 24.04 (décisions d'architecture v1.0)
+# - PostgreSQL 16 (base de données figée)
+# - RustDesk OSS : signalisation (hbbs) et relais (hbbr) sur des RÉSEAUX DISTINCTS
+# - Console Next.js connectée à PostgreSQL
+#
+# Lancement : docker compose -f docker-compose.vps.yml up -d --build
+# Prérequis : basculer prisma/schema.prisma en provider "postgresql" avant le build
+#             (voir docs/DEPLOIEMENT-VPS.md).
+
+services:
+  console:
+    build: .
+    container_name: arc-console
+    environment:
+      DATABASE_URL: postgresql://arc:${POSTGRES_PASSWORD:-CHANGEZ_CE_MOT_DE_PASSE}@db:5432/android_remote_control
+    ports:
+      - "127.0.0.1:3000:3000" # derrière Nginx/pare-feu : pas d'exposition publique directe
+    networks:
+      - app-db
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    container_name: arc-postgres
+    environment:
+      POSTGRES_USER: arc
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGEZ_CE_MOT_DE_PASSE}
+      POSTGRES_DB: android_remote_control
+    volumes:
+      - arc-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U arc -d android_remote_control"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - app-db
+    restart: unless-stopped
+    # Pas de `ports:` : la base n'est JAMAIS exposée publiquement (critère d'acceptation n° 7).
+
+  # ——— RustDesk OSS : serveur de SIGNALISATION (hbbs) ———
+  rustdesk-signalisation:
+    image: rustdesk/rustdesk-server:latest
+    container_name: arc-rustdesk-hbbs
+    command: hbbs
+    ports:
+      - "21115:21115/tcp" # test de disponibilité
+      - "21116:21116/tcp" # hole punching / ID
+      - "21116:21116/udp" # enregistrement des appareils
+      - "21118:21118/tcp" # websocket (clients web)
+    volumes:
+      - arc-rustdesk-hbbs:/root
+    networks:
+      - signalisation # réseau isolé : le relais n'y a pas accès
+    restart: unless-stopped
+
+  # ——— RustDesk OSS : serveur de RELAIS (hbbr) ———
+  rustdesk-relais:
+    image: rustdesk/rustdesk-server:latest
+    container_name: arc-rustdesk-hbbr
+    command: hbbr
+    ports:
+      - "21117:21117/tcp" # relais flux/contrôle
+      - "21119:21119/tcp" # websocket relais
+    volumes:
+      - arc-rustdesk-hbbr:/root
+    networks:
+      - relais # réseau isolé : la signalisation n'y a pas accès
+    restart: unless-stopped
+
+networks:
+  app-db: {}
+  signalisation: {}
+  relais: {}
+
+volumes:
+  arc-pgdata: {}
+  arc-rustdesk-hbbs: {}
+  arc-rustdesk-hbbr: {}
