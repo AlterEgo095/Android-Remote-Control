@@ -1,17 +1,37 @@
 # Android Remote Control — démarrage rapide (SQLite, sans dépendance externe)
-# Production VPS conforme aux décisions d'architecture : voir docker-compose.vps.yml
+# Simulation/dev uniquement. Production VPS : voir docker-compose.vps.yml.
+# Le conteneur démarre sans migration ni seed automatiques :
+#   docker compose -f docker-compose.yml exec console bunx --bun prisma migrate deploy --schema prisma/schema.prisma
+#   docker compose -f docker-compose.yml exec console bun prisma/seed.ts
+
+name: android-remote-control-dev
 
 services:
   console:
     build: .
-    container_name: arc-console
+    image: arc-console:1.0.0-dev
+    container_name: arc-console-dev
     environment:
+      NODE_ENV: production
+      ARC_MODE: simulation
+      ARC_DB_SCHEMA: sqlite
       DATABASE_URL: file:/app/db/custom.db
     ports:
       - "3000:3000"
     volumes:
       - arc-db:/app/db
+    healthcheck:
+      test: ["CMD", "bun", "-e", "const r = await fetch('http://127.0.0.1:3000/health'); if (!r.ok) process.exit(1);"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   arc-db:

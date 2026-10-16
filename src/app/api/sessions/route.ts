@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
+import { IS_PRODUCTION_MODE } from "@/lib/config";
 
 export async function GET() {
   const session = await getSession();
@@ -31,10 +32,28 @@ export async function POST(request: NextRequest) {
   }
 
   const kind = body.kind === "CONTROL" ? "CONTROL" : "OBSERVE";
-  const ip = request.headers.get("x-forwarded-for") ?? "local";
+  const ip =
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "inconnue";
 
   if (!body.deviceId) {
     return NextResponse.json({ error: "Appareil cible requis" }, { status: 400 });
+  }
+
+  // Mode production sans intégration RustDesk/terminal : déclarer une session
+  // « active » serait une donnée fabriquée — refus explicite et honnête.
+  if (IS_PRODUCTION_MODE) {
+    await recordAudit({
+      actor: session.username,
+      action: "SESSION_UNAVAILABLE",
+      targetType: "SESSION",
+      decision: "ERROR",
+      detail: `Ouverture impossible : intégration terminal indisponible (mode production)`,
+      ip,
+    });
+    return NextResponse.json(
+      { error: "Intégration terminal indisponible — aucune session réelle ne peut être ouverte pour l'instant" },
+      { status: 503 },
+    );
   }
 
   const device = await db.device.findUnique({ where: { id: body.deviceId } });
@@ -81,7 +100,9 @@ export async function POST(request: NextRequest) {
       deviceId: device.id,
       kind,
       status: "ACTIVE",
-      sourceIp: "203.0.113.24",
+      // IP réelle de l'opérateur (proxy Nginx → x-forwarded-for) ; « inconnue »
+      // si absente — plus jamais d'adresse factice.
+      sourceIp: ip === "inconnue" ? null : ip,
     },
     include: { device: { select: { id: true, name: true, rustdeskId: true } } },
   });
@@ -92,7 +113,7 @@ export async function POST(request: NextRequest) {
     targetType: "SESSION",
     targetId: created.id,
     decision: "ALLOWED",
-    detail: `Session ${kind === "CONTROL" ? "de contrôle" : "d'observation"} ouverte sur « ${device.name} » depuis un réseau extérieur (relais RustDesk)`,
+    detail: `Session ${kind === "CONTROL" ? "de contrôle" : "d'observation"} ouverte sur « ${device.name} » (relais RustDesk simulé — phase 02)`,
     ip,
   });
 

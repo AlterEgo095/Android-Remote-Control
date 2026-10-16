@@ -1,5 +1,8 @@
 // Seed du prototype — Android Remote Control v1.0
 // Exécution : bun prisma/seed.ts
+// ⚠️ INTERDIT en mode production : ce seed détruit les tables et crée des
+// identifiants de démonstration. En production, utiliser
+// `bun prisma/bootstrap-admin.ts` (voir deploy/env.vps.example).
 
 import { PrismaClient } from "@prisma/client";
 import { randomBytes, scryptSync } from "crypto";
@@ -13,6 +16,14 @@ function hashPassword(password: string): string {
 }
 
 async function main() {
+  if (process.env.ARC_MODE === "production") {
+    console.error(
+      "[ARC] Refus : le seed de démonstration ne peut pas être exécuté en mode production (ARC_MODE=production).",
+    );
+    console.error("[ARC] Utilisez prisma/bootstrap-admin.ts pour créer le premier administrateur.");
+    process.exit(1);
+  }
+
   console.log("Nettoyage des tables…");
   await db.auditEvent.deleteMany();
   await db.command.deleteMany();

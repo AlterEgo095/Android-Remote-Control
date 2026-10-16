@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
-import { findCommand } from "@/lib/commands-registry";
+import { findCommand, validateCommandPayload } from "@/lib/commands-registry";
+import { IS_PRODUCTION_MODE } from "@/lib/config";
 
 export async function GET() {
   const session = await getSession();
@@ -31,10 +32,28 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Requête invalide" }, { status: 400 });
   }
 
-  const ip = request.headers.get("x-forwarded-for") ?? "local";
+  const ip =
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "inconnue";
 
   if (!body.deviceId || !body.name) {
     return NextResponse.json({ error: "Appareil et commande requis" }, { status: 400 });
+  }
+
+  // Mode production sans intégration terminal : aucune commande ne peut être
+  // exécutée réellement — la plateforme refuse au lieu de fabriquer un cycle.
+  if (IS_PRODUCTION_MODE) {
+    await recordAudit({
+      actor: session.username,
+      action: "COMMAND_UNAVAILABLE",
+      targetType: "COMMAND",
+      decision: "ERROR",
+      detail: `Commande « ${body.name} » impossible : intégration terminal indisponible (mode production)`,
+      ip,
+    });
+    return NextResponse.json(
+      { error: "Intégration terminal indisponible — aucune commande ne peut être exécutée pour l'instant" },
+      { status: 503 },
+    );
   }
 
   // Registre des commandes autorisées : toute commande hors registre est rejetée.
@@ -46,12 +65,25 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Validation serveur stricte du payload selon le type de commande.
+  const payloadValidation = validateCommandPayload(body.name, body.payload);
+  if (!payloadValidation.ok) {
+    await recordAudit({
+      actor: session.username,
+      action: "COMMAND_INVALID",
+      targetType: "COMMAND",
+      decision: "DENIED",
+      detail: `${body.name} : ${payloadValidation.error}`,
+      ip,
+    });
+    return NextResponse.json({ error: payloadValidation.error }, { status: 400 });
+  }
+  const payload = payloadValidation.value;
+
   const device = await db.device.findUnique({ where: { id: body.deviceId } });
   if (!device) {
     return NextResponse.json({ error: "Appareil introuvable" }, { status: 404 });
   }
-
-  const payload = body.payload ? JSON.stringify(body.payload) : null;
 
   // Refus 1 : appareil non autorisé ou révoqué → commande REFUSED journalisée.
   if (!device.authorized || device.status === "REVOKED") {

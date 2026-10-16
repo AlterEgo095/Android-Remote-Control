@@ -12,6 +12,7 @@ export default function Home() {
   const {
     bootLoading,
     user,
+    mode,
     login,
     logout,
     stats,
@@ -41,6 +42,7 @@ export default function Home() {
   return (
     <ConsoleShell
       user={user}
+      mode={mode}
       onLogout={() => void logout()}
       stats={stats}
       devices={devices}

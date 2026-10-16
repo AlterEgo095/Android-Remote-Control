@@ -12,11 +12,13 @@ import {
   MonitorPlay,
   MonitorSmartphone,
   ScrollText,
+  ShieldAlert,
   Smartphone,
   type LucideIcon,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import type {
+  ArcMode,
   AuditEvent,
   AuthUser,
   Command,
@@ -24,6 +26,7 @@ import type {
   Session,
   Stats,
 } from "@/lib/types";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,6 +57,7 @@ const NAV_ITEMS: { id: ConsoleView; label: string; icon: LucideIcon }[] = [
 
 interface ConsoleShellProps {
   user: AuthUser;
+  mode: ArcMode | null;
   onLogout: () => void;
   stats: Stats | null;
   devices: Device[] | null;
@@ -65,6 +69,7 @@ interface ConsoleShellProps {
 
 export function ConsoleShell({
   user,
+  mode,
   onLogout,
   stats,
   devices,
@@ -94,12 +99,21 @@ export function ConsoleShell({
                 <Badge variant="outline" className="hidden sm:inline-flex">
                   v1.0
                 </Badge>
-                <Badge
-                  variant="outline"
-                  className="hidden border-amber-500/40 text-amber-400 md:inline-flex"
-                >
-                  Prototype — données simulées
-                </Badge>
+                {mode === "production" ? (
+                  <Badge
+                    variant="outline"
+                    className="hidden border-emerald-500/40 text-emerald-400 md:inline-flex"
+                  >
+                    Production — intégration terminal à connecter
+                  </Badge>
+                ) : (
+                  <Badge
+                    variant="outline"
+                    className="hidden border-amber-500/40 text-amber-400 md:inline-flex"
+                  >
+                    Simulation — données simulées
+                  </Badge>
+                )}
               </div>
               <p className="hidden text-xs text-muted-foreground sm:block">
                 Console d&apos;administration
@@ -188,6 +202,17 @@ export function ConsoleShell({
         {/* Contenu */}
         <main className="w-full flex-1 p-4 md:p-6">
           <div className="mx-auto w-full max-w-7xl">
+            {mode === "production" && (
+              <Alert className="mb-4 border-amber-500/40 bg-amber-500/5">
+                <ShieldAlert className="size-4 text-amber-400" aria-hidden />
+                <AlertDescription className="text-amber-200/90">
+                  <span className="font-semibold text-amber-300">Mode production — intégration terminal indisponible.</span>{" "}
+                  L&apos;agent Android et la signalisation RustDesk ne sont pas encore connectés : aucune
+                  session réelle ne peut être ouverte et aucune commande ne peut être exécutée. Les
+                  données affichées proviennent uniquement des opérations manuelles enregistrées.
+                </AlertDescription>
+              </Alert>
+            )}
             <motion.div
               key={view}
               initial={{ opacity: 0, y: 8 }}
@@ -217,9 +242,12 @@ export function ConsoleShell({
 
       {/* ——— Footer ——— */}
       <footer className="mt-auto border-t px-4 py-3 text-center text-xs text-muted-foreground">
-        Android Remote Control v1.0 · Prototype de console d&apos;administration — signalisation
-        &amp; relais RustDesk simulés · Next.js + API + Prisma (SQLite, PostgreSQL en production) ·
-        Fuseau horaire : Africa/Kinshasa (UTC+1)
+        Android Remote Control v1.0 · Console d&apos;administration ·{" "}
+        {mode === "production"
+          ? "Mode production — intégration terminal (agent Android + RustDesk) à connecter"
+          : "Prototype de console d'administration — signalisation & relais RustDesk simulés"}{" "}
+        · Next.js + API + Prisma (SQLite, PostgreSQL en production) · Fuseau horaire :{" "}
+        Africa/Kinshasa (UTC+1)
       </footer>
     </div>
   );

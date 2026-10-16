@@ -1,33 +1,59 @@
-# Android Remote Control — cible VPS Ubuntu 24.04 (décisions d'architecture v1.0)
-# - PostgreSQL 16 (base de données figée)
-# - RustDesk OSS : signalisation (hbbs) et relais (hbbr) sur des RÉSEAUX DISTINCTS
-# - Console Next.js connectée à PostgreSQL
+# Android Remote Control — COMPOSE DE PRODUCTION (VPS Ubuntu 24.04)
+# Cible : https://android.aenews.online derrière Nginx (hôte).
 #
-# Lancement : docker compose -f docker-compose.vps.yml up -d --build
-# Prérequis : basculer prisma/schema.prisma en provider "postgresql" avant le build
-#             (voir docs/DEPLOIEMENT-VPS.md).
+# Prérequis (voir docs/PLAN-DEPLOIEMENT.md) :
+#   1. cp deploy/env.vps.example .env   puis REMPLIR les secrets (openssl rand -base64 48)
+#   2. docker compose -f docker-compose.vps.yml up -d --build
+#   3. docker compose -f docker-compose.vps.yml run --rm console bun prisma/bootstrap-admin.ts
+#
+# Garanties : nom de projet dédié (pas de collision avec les autres apps du VPS),
+# PostgreSQL jamais publié, secrets obligatoires (:? échoue s'ils manquent),
+# healthchecks, rotation des logs, restart automatique, versions épinglées.
+
+name: android-remote-control
 
 services:
   console:
-    build: .
+    build:
+      context: .
+      args:
+        ARC_SCHEMA: postgres
+    image: arc-console:1.0.0
     container_name: arc-console
+    env_file:
+      - .env
     environment:
-      DATABASE_URL: postgresql://arc:${POSTGRES_PASSWORD:-CHANGEZ_CE_MOT_DE_PASSE}@db:5432/android_remote_control
+      NODE_ENV: production
+      ARC_MODE: production
+      ARC_DB_SCHEMA: postgres
+      ARC_RUN_MIGRATIONS: "1"
+      DATABASE_URL: postgresql://arc:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant dans .env}@db:5432/android_remote_control
     ports:
-      - "127.0.0.1:3000:3000" # derrière Nginx/pare-feu : pas d'exposition publique directe
-    networks:
-      - app-db
+      - "127.0.0.1:3000:3000" # uniquement l'interface locale : Nginx proxifie
+    healthcheck:
+      test: ["CMD", "bun", "-e", "const r = await fetch('http://127.0.0.1:3000/health'); if (!r.ok) process.exit(1);"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
     depends_on:
       db:
         condition: service_healthy
+    networks:
+      - arc-app-db
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   db:
-    image: postgres:16-alpine
+    image: postgres:16.4-alpine
     container_name: arc-postgres
     environment:
       POSTGRES_USER: arc
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGEZ_CE_MOT_DE_PASSE}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant dans .env}
       POSTGRES_DB: android_remote_control
     volumes:
       - arc-pgdata:/var/lib/postgresql/data
@@ -37,13 +63,20 @@ services:
       timeout: 3s
       retries: 10
     networks:
-      - app-db
+      - arc-app-db
     restart: unless-stopped
-    # Pas de `ports:` : la base n'est JAMAIS exposée publiquement (critère d'acceptation n° 7).
+    # Pas de `ports:` : la base n'est JAMAIS exposée (critère d'acceptation n° 7).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ——— RustDesk OSS : serveur de SIGNALISATION (hbbs) ———
+  # NB : image épinglée ; vérifier la dernière 1.1.x au déploiement
+  # (docker manifest inspect rustdesk/rustdesk-server:1.1.12).
   rustdesk-signalisation:
-    image: rustdesk/rustdesk-server:latest
+    image: rustdesk/rustdesk-server:1.1.12
     container_name: arc-rustdesk-hbbs
     command: hbbs
     ports:
@@ -54,12 +87,17 @@ services:
     volumes:
       - arc-rustdesk-hbbs:/root
     networks:
-      - signalisation # réseau isolé : le relais n'y a pas accès
+      - arc-rustdesk-signal # réseau isolé : le relais n'y a pas accès
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ——— RustDesk OSS : serveur de RELAIS (hbbr) ———
   rustdesk-relais:
-    image: rustdesk/rustdesk-server:latest
+    image: rustdesk/rustdesk-server:1.1.12
     container_name: arc-rustdesk-hbbr
     command: hbbr
     ports:
@@ -68,13 +106,18 @@ services:
     volumes:
       - arc-rustdesk-hbbr:/root
     networks:
-      - relais # réseau isolé : la signalisation n'y a pas accès
+      - arc-rustdesk-relais # réseau isolé : la signalisation n'y a pas accès
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 networks:
-  app-db: {}
-  signalisation: {}
-  relais: {}
+  arc-app-db: {}
+  arc-rustdesk-signal: {}
+  arc-rustdesk-relais: {}
 
 volumes:
   arc-pgdata: {}

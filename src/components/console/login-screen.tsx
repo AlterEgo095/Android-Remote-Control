@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2, MonitorSmartphone } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getErrorMessage } from "@/hooks/use-console-data";
+import type { ArcMode } from "@/lib/types";
 
 interface LoginScreenProps {
   onLogin: (username: string, password: string) => Promise<void>;
@@ -24,6 +25,26 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [mode, setMode] = useState<ArcMode | null>(null);
+
+  // Mode d'exécution public : l'encart de démonstration n'est affiché
+  // qu'en simulation — jamais en production (aucun identifiant divulgué).
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/system/config")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { mode?: ArcMode } | null) => {
+        if (!cancelled && data && (data.mode === "simulation" || data.mode === "production")) {
+          setMode(data.mode);
+        }
+      })
+      .catch(() => {
+        // Config indisponible : on n'affiche aucun indice.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -85,16 +106,24 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
             </Button>
           </form>
 
-          <div className="rounded-md bg-muted p-3 text-xs text-muted-foreground">
-            Démonstration — identifiants :{" "}
-            <span className="font-mono text-foreground">admin</span> /{" "}
-            <span className="font-mono text-foreground">Arc@2024!</span>
-          </div>
+          {mode === "simulation" && (
+            <div className="rounded-md bg-muted p-3 text-xs text-muted-foreground">
+              Démonstration — identifiants :{" "}
+              <span className="font-mono text-foreground">admin</span> /{" "}
+              <span className="font-mono text-foreground">Arc@2024!</span>
+            </div>
+          )}
 
           <div className="flex justify-center">
-            <Badge variant="outline" className="border-amber-500/40 text-amber-400">
-              Prototype — données simulées
-            </Badge>
+            {mode === "production" ? (
+              <Badge variant="outline" className="border-emerald-500/40 text-emerald-400">
+                Production — intégration terminal à connecter
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="border-amber-500/40 text-amber-400">
+                Prototype — données simulées
+              </Badge>
+            )}
           </div>
         </CardContent>
       </Card>

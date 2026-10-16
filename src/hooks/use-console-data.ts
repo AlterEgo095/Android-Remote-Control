@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import type {
+  ArcMode,
   AuditEvent,
   AuthUser,
   Command,
@@ -72,6 +73,7 @@ export async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
 export function useConsoleData() {
   const [bootLoading, setBootLoading] = useState(true);
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [mode, setMode] = useState<ArcMode | null>(null);
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [devices, setDevices] = useState<Device[] | null>(null);
@@ -79,15 +81,27 @@ export function useConsoleData() {
   const [commands, setCommands] = useState<Command[] | null>(null);
   const [audit, setAudit] = useState<AuditEvent[] | null>(null);
 
-  // ——— Vérification de session au montage
+  // ——— Vérification de session + mode d'exécution au montage
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/auth/me");
-        if (res.ok) {
-          const data = (await res.json()) as { user: AuthUser };
-          if (!cancelled) setUser(data.user);
+        const [meRes, configRes] = await Promise.all([
+          fetch("/api/auth/me"),
+          fetch("/api/system/config"),
+        ]);
+        if (configRes.ok) {
+          const config = (await configRes.json()) as { mode?: ArcMode };
+          if (!cancelled && (config.mode === "simulation" || config.mode === "production")) {
+            setMode(config.mode);
+          }
+        }
+        if (meRes.ok) {
+          const data = (await meRes.json()) as { user: AuthUser; mode?: ArcMode };
+          if (!cancelled) {
+            setUser(data.user);
+            if (data.mode === "simulation" || data.mode === "production") setMode(data.mode);
+          }
         }
       } catch {
         // Serveur injoignable : on reste sur l'écran de connexion.
@@ -160,7 +174,7 @@ export function useConsoleData() {
     [loadStats, loadDevices, loadSessions, loadCommands, loadAudit],
   );
 
-  // ——— Polling : tick simulateur + rechargement des GET toutes les 4 s
+  // ——— Polling : tick simulateur (simulation uniquement) + rechargement des GET toutes les 4 s
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
@@ -169,11 +183,15 @@ export function useConsoleData() {
 
     const id = setInterval(() => {
       void (async () => {
-        try {
-          await fetch("/api/simulator/tick", { method: "POST" });
-        } catch {
-          // Simulateur indisponible : on continue à rafraîchir les données.
+        if (mode === "simulation") {
+          try {
+            await fetch("/api/simulator/tick", { method: "POST" });
+          } catch {
+            // Simulateur indisponible : on continue à rafraîchir les données.
+          }
         }
+        // En production : AUCUN tick — aucune donnée fabriquée, uniquement les
+        // données réelles de la base (intégration terminal à venir).
         if (!cancelled) void refreshAll(true);
       })();
     }, POLL_INTERVAL_MS);
@@ -182,15 +200,16 @@ export function useConsoleData() {
       cancelled = true;
       clearInterval(id);
     };
-  }, [user, refreshAll]);
+  }, [user, mode, refreshAll]);
 
   const login = useCallback(
     async (username: string, password: string) => {
-      const data = await apiFetch<{ user: AuthUser }>("/api/auth/login", {
+      const data = await apiFetch<{ user: AuthUser; mode?: ArcMode }>("/api/auth/login", {
         method: "POST",
         body: JSON.stringify({ username, password }),
       });
       setUser(data.user);
+      if (data.mode === "simulation" || data.mode === "production") setMode(data.mode);
     },
     [],
   );
@@ -212,6 +231,7 @@ export function useConsoleData() {
   return {
     bootLoading,
     user,
+    mode,
     login,
     logout,
     stats,

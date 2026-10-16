@@ -1,9 +1,9 @@
-import { randomBytes, scryptSync, timingSafeEqual } from "crypto";
+import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
 import { db } from "./db";
+import { COOKIE_SECURE, SESSION_MAX_AGE_SECONDS, SESSION_SECRET } from "./config";
 
 const COOKIE_NAME = "arc_token";
-const MAX_AGE_SECONDS = 60 * 60 * 8; // 8 h
 
 export interface SessionUser {
   username: string;
@@ -24,16 +24,43 @@ export function verifyPassword(password: string, stored: string): boolean {
   return candidate.length === expected.length && timingSafeEqual(candidate, expected);
 }
 
+// ——— Token de session signé (HMAC-SHA256) ————————————————————————————
+// Format : base64url(payload).base64url(hmac)
+// Le payload porte son expiration ; le serveur vérifie signature ET expiration.
+
+interface SessionPayload {
+  u: string;
+  r: string;
+  iat: number;
+  exp: number;
+}
+
+function signPayload(payloadB64: string): string {
+  return createHmac("sha256", SESSION_SECRET).update(payloadB64).digest("base64url");
+}
+
+function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+}
+
 export async function setSessionCookie(username: string, role: string): Promise<void> {
   const store = await cookies();
-  const token = Buffer.from(JSON.stringify({ u: username, r: role, t: Date.now() })).toString(
-    "base64url",
-  );
-  store.set(COOKIE_NAME, token, {
+  const now = Date.now();
+  const payload: SessionPayload = {
+    u: username,
+    r: role,
+    iat: now,
+    exp: now + SESSION_MAX_AGE_SECONDS * 1000,
+  };
+  const payloadB64 = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  store.set(COOKIE_NAME, `${payloadB64}.${signPayload(payloadB64)}`, {
     httpOnly: true,
+    secure: COOKIE_SECURE,
     sameSite: "lax",
     path: "/",
-    maxAge: MAX_AGE_SECONDS,
+    maxAge: SESSION_MAX_AGE_SECONDS,
   });
 }
 
@@ -42,17 +69,23 @@ export async function clearSessionCookie(): Promise<void> {
   store.delete(COOKIE_NAME);
 }
 
-/** Lit le cookie, vérifie que l'utilisateur existe toujours, retourne la session. */
+/**
+ * Lit le cookie, vérifie la signature HMAC, l'expiration serveur et
+ * l'existence de l'utilisateur. Toute anomalie → session nulle.
+ */
 export async function getSession(): Promise<SessionUser | null> {
   const store = await cookies();
   const token = store.get(COOKIE_NAME)?.value;
   if (!token) return null;
+  const dotIndex = token.indexOf(".");
+  if (dotIndex <= 0) return null;
+  const payloadB64 = token.slice(0, dotIndex);
+  const signature = token.slice(dotIndex + 1);
+  if (!safeEqual(signature, signPayload(payloadB64))) return null;
   try {
-    const data = JSON.parse(Buffer.from(token, "base64url").toString()) as {
-      u?: string;
-      r?: string;
-    };
-    if (!data.u) return null;
+    const data = JSON.parse(Buffer.from(payloadB64, "base64url").toString()) as Partial<SessionPayload>;
+    if (!data.u || typeof data.exp !== "number") return null;
+    if (Date.now() > data.exp) return null; // expiration vérifiée côté serveur
     const user = await db.adminUser.findUnique({ where: { username: data.u } });
     if (!user) return null;
     return { username: user.username, role: user.role };

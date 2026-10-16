@@ -2,7 +2,7 @@
 
 Prototype fonctionnel de la **console d'administration** du système *Android Remote Control* (v1.0) : pilotage à distance d'appareils Android (cible initiale : un Android 14) depuis un VPS, avec contrôle visuel RustDesk, registre de commandes autorisées et journal d'audit complet.
 
-> **Statut** : prototype de la phase 04 (« Console d'administration ») du plan de réalisation en 5 phases. Le backend de simulation matérialise le contrat d'API qui sera implémenté par FastAPI + PostgreSQL sur le VPS.
+> **Statut** : prototype de la phase 04 (« Console d'administration ») du plan de réalisation en 5 phases — **audit complet effectué, durci et préparé pour la production** sur `https://android.aenews.online` (voir `docs/RAPPORT-AUDIT-CODE.md` et `docs/PLAN-DEPLOIEMENT.md`). Le backend de simulation matérialise le contrat d'API qui sera repris par FastAPI + PostgreSQL sur le VPS. Le simulateur est **strictement séparé** du mode production (voir « Modes d'exécution »).
 
 ## Écrans
 
@@ -15,7 +15,19 @@ Prototype fonctionnel de la **console d'administration** du système *Android Re
 | **Journal d'audit** | Traçabilité intégrale : connexions, refus, révocations, événements système — filtres par décision et par type de cible |
 | **Plan & décisions** | Feuille de route en 5 phases, critères d'acceptation v1, décisions d'architecture figées |
 
-Identifiants de démonstration : **admin / Arc@2024!**
+Identifiants de démonstration : **admin / Arc@2024!** — affichés à l'écran **uniquement en mode simulation** ; jamais en production (création de l'administrateur par `prisma/bootstrap-admin.ts`).
+
+## Modes d'exécution (`ARC_MODE`)
+
+| | `simulation` (défaut, prototype) | `production` |
+|---|---|---|
+| Simulateur (heartbeats, pertes réseau, résultats) | actif | **désactivé (503)** — le frontend ne l'appelle plus |
+| Ouverture de session / émission de commande | cycle simulé | **503 « intégration terminal indisponible »** — journalisé dans l'audit, aucune donnée fabriquée |
+| Autorisation d'appareil | passe « En ligne » | reste « En attente de première connexion réelle » |
+| Administrateur | seed de démonstration | `bun prisma/bootstrap-admin.ts` (one-shot) |
+| Interface | badge ambre « Simulation » | badge + bandeau « intégration terminal à connecter », encart démo masqué |
+
+Le mode courant est consultable publiquement via `GET /api/system/config`.
 
 ## Décisions d'architecture figées (v1.0)
 
@@ -63,23 +75,30 @@ bun run dev             # http://localhost:3000
 
 ### Passer à PostgreSQL (production VPS)
 
-1. Dans `prisma/schema.prisma` : `provider = "postgresql"`.
-2. `DATABASE_URL=postgresql://arc:<mot-de-passe>@localhost:5432/android_remote_control`.
-3. `bunx prisma migrate deploy && bun run db:seed`.
-4. Regénérer le client : `bunx prisma generate`.
+Le schéma PostgreSQL dédié vit dans `prisma/postgres/` avec sa **migration de base contrôlée**. Le build Docker sélectionne le provider sans aucune édition manuelle :
 
-## Déploiement VPS (Docker Compose)
+```bash
+docker build --build-arg ARC_SCHEMA=postgres -t arc-console .   # utilisé par docker-compose.vps.yml
+docker compose -f docker-compose.vps.yml run --rm console \
+  bunx --bun prisma migrate deploy --schema prisma/postgres/schema.prisma
+```
+
+En local (hors Docker) : `DATABASE_URL=postgresql://… bun run db:migrate-deploy-pg`. Le **seed de démonstration refuse de s'exécuter** en mode production — utiliser `bun run db:bootstrap-admin`.
+
+## Déploiement VPS (Docker Compose) — android.aenews.online
 
 Deux fichiers sont fournis :
 
-- **`docker-compose.yml`** — démarrage rapide en local/VPS avec SQLite (volumes persistants) ;
-- **`docker-compose.vps.yml`** — cible production conforme aux décisions figées : console Next.js + **PostgreSQL 16** + **RustDesk OSS** (signalisation `hbbs` et relais `hbbr` sur des réseaux Docker distincts, comme l'exige la section « Réseaux différents »).
+- **`docker-compose.yml`** — démarrage rapide en local/simulation avec SQLite (volumes persistants) ;
+- **`docker-compose.vps.yml`** — cible production (projet Compose `android-remote-control`, versions épinglées, healthchecks, logs bornés, secrets obligatoires) : console Next.js bindée **127.0.0.1:3000** + **PostgreSQL 16.4** (jamais publié) + **RustDesk OSS 1.1.12** (signalisation `hbbs` et relais `hbbr` sur des réseaux Docker distincts).
 
 ```bash
+cp deploy/env.vps.example .env    # remplir ARC_SESSION_SECRET + POSTGRES_PASSWORD
 docker compose -f docker-compose.vps.yml up -d --build
+docker compose -f docker-compose.vps.yml run --rm console bun prisma/bootstrap-admin.ts
 ```
 
-Le guide complet (audit préalable du VPS, ports à ouvrir, durcissement) se trouve dans [`docs/DEPLOIEMENT-VPS.md`](docs/DEPLOIEMENT-VPS.md).
+Le plan pas-à-pas (audit VPS, Nginx/TLS `android.aenews.online`, RustDesk, validation, retours arrière) se trouve dans [`docs/PLAN-DEPLOIEMENT.md`](docs/PLAN-DEPLOIEMENT.md) ; les configurations Nginx prêtes à installer sont dans [`deploy/nginx/`](deploy/nginx/).
 
 ### Ports RustDesk à exposer
 
@@ -92,18 +111,20 @@ Le guide complet (audit préalable du VPS, ports à ouvrir, durcissement) se tro
 
 | Méthode | Route | Rôle |
 |---|---|---|
-| POST | `/api/auth/login` | Connexion (cookie httpOnly) |
+| GET | `/health` | Contrôle de disponibilité minimal (service + base), sans exposition d'information |
+| POST | `/api/auth/login` | Connexion (cookie httpOnly + HMAC ; anti-bruteforce 429) |
 | GET | `/api/auth/me` · POST `/api/auth/logout` | Session courante / déconnexion |
+| GET | `/api/system/config` | Mode d'exécution public (`simulation` \| `production`) |
 | GET | `/api/stats` | Compteurs temps réel + audit récent |
-| GET/POST | `/api/devices` | Liste / enregistrement d'appareils |
+| GET/POST | `/api/devices` | Liste / enregistrement d'appareils (zod) |
 | GET/PATCH | `/api/devices/[id]` | Fiche détaillée / autoriser · révoquer · notes |
 | GET/POST | `/api/sessions` · PATCH `/api/sessions/[id]` | Sessions administratives / clôture |
-| GET/POST | `/api/commands` | Historique / émission (registre obligatoire) |
+| GET/POST | `/api/commands` | Historique / émission (registre obligatoire, payload zod strict) |
 | GET | `/api/commands/registry` | Registre des commandes autorisées |
-| GET | `/api/audit?decision=&targetType=` | Journal d'audit filtrable |
-| POST | `/api/simulator/tick` | Pas de simulation (prototype) |
+| GET | `/api/audit?decision=&targetType=` | Journal d'audit filtrable (valeurs contraintes) |
+| POST | `/api/simulator/tick` | Pas de simulation (prototype uniquement — 503 en production) |
 
-**Règles de refus implémentées** : commande hors registre → 400 ; appareil non autorisé/révoqué → `REFUSED` + audit `DENIED` ; commande nécessitant une session de contrôle active sans session → `REFUSED` + audit ; session sur appareil injoignable → 409.
+**Règles de refus implémentées** : commande hors registre → 400 ; payload invalide → 400 + audit ; appareil non autorisé/révoqué → `REFUSED` + audit `DENIED` ; commande nécessitant une session de contrôle active sans session → `REFUSED` + audit ; session sur appareil injoignable → 409 ; `Origin` étrangère sur requête mutante → 403 (CSRF) ; trop de tentatives de connexion → 429.
 
 ## Registre des commandes autorisées
 
@@ -128,6 +149,12 @@ Le guide complet (audit préalable du VPS, ports à ouvrir, durcissement) se tro
 
 ## Sécurité
 
-- Mots de passe hachés (**scrypt**, salt aléatoire) ; cookie de session `httpOnly` + `sameSite=lax`.
-- Toute action sensible est **journalisée dans l'audit** — y compris les refus et les échecs.
-- `.env` jamais commité ; identifiants de démonstration à changer avant tout déploiement réel (voir `docs/DEPLOIEMENT-VPS.md`, section durcissement).
+- Mots de passe hachés (**scrypt**, salt aléatoire, `timingSafeEqual`).
+- Cookie de session **signé HMAC-SHA256** (`ARC_SESSION_SECRET` obligatoire en production), `httpOnly` + `sameSite=lax` + **`Secure`** en production, expiration vérifiée côté serveur.
+- **Anti-bruteforce** : 5 échecs/15 min par IP+identifiant (429 + `Retry-After`), garde par IP, blocages journalisés.
+- **Anti-CSRF** : toute requête mutante `/api/*` avec `Origin` étrangère est rejetée (403) — `src/proxy.ts` (Next 16).
+- **Validation zod** serveur sur les entrées (appareils, sessions, commandes/payloads, filtres d'audit).
+- En-têtes de sécurité (X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy) posés par l'app **et** Nginx ; HSTS en production.
+- Toute action sensible est **journalisée dans l'audit** — y compris les refus, échecs et blocages ; aucun secret n'est journalisé.
+- `.env` jamais commité (`deploy/env.vps.example` documenté) ; **aucun identifiant de démonstration en production** (seed refusé, bootstrap one-shot).
+- Tests de fumée ré-exécutables après déploiement : `bun run smoke-test` (ou `bash deploy/smoke-test.sh`).

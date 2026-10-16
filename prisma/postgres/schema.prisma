@@ -1,0 +1,87 @@
+// Schéma PostgreSQL — Android Remote Control v1.0 (production VPS)
+// Identique au schéma SQLite (prisma/schema.prisma) : seul le datasource change.
+// Le build Docker sélectionne ce schéma avec --build-arg ARC_SCHEMA=postgres.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ——— Android Remote Control v1.0 — schéma de données
+
+model Device {
+  id          String    @id @default(cuid())
+  name        String
+  model       String
+  osVersion   String    @default("Android 14")
+  rustdeskId  String    @unique
+  status      String    @default("PENDING") // ONLINE | OFFLINE | PENDING | REVOKED
+  authorized  Boolean   @default(false)
+  lastSeenAt  DateTime?
+  notes       String?
+  createdAt   DateTime  @default(now())
+  sessions    Session[]
+  commands    Command[]
+
+  @@index([status])
+  @@index([authorized])
+}
+
+model Session {
+  id        String    @id @default(cuid())
+  deviceId  String
+  device    Device    @relation(fields: [deviceId], references: [id])
+  kind      String    @default("OBSERVE") // OBSERVE | CONTROL
+  status    String    @default("ACTIVE") // ACTIVE | CLOSED | FAILED
+  sourceIp  String?
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+  commands  Command[]
+
+  @@index([deviceId, status])
+  @@index([status])
+}
+
+model Command {
+  id         String    @id @default(cuid())
+  deviceId   String
+  device     Device    @relation(fields: [deviceId], references: [id])
+  sessionId  String?
+  session    Session?  @relation(fields: [sessionId], references: [id])
+  name       String // voir registre : SCREEN_VIEW, SCREENSHOT, APP_LAUNCH, TEXT_INPUT, TAP, SWIPE, LOCK, REBOOT
+  payload    String?
+  status     String    @default("PENDING") // PENDING | RUNNING | SUCCESS | FAILED | REFUSED
+  result     String?
+  createdAt  DateTime  @default(now())
+  executedAt DateTime?
+
+  @@index([deviceId])
+  @@index([status, createdAt])
+}
+
+model AuditEvent {
+  id         String   @id @default(cuid())
+  actor      String // "admin" | "simulateur" | ...
+  action     String // ex. DEVICE_AUTHORIZED, COMMAND_REFUSED, SESSION_OPENED...
+  targetType String // DEVICE | SESSION | COMMAND | SYSTEM
+  targetId   String?
+  decision   String // ALLOWED | DENIED | ERROR
+  detail     String?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@index([decision, createdAt])
+  @@index([targetType, createdAt])
+}
+
+model AdminUser {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String // scrypt: salt:hash
+  role         String   @default("ADMIN")
+  createdAt    DateTime @default(now())
+}

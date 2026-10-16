@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth";
-import type { Stats } from "@/lib/types";
+import type { AuditEvent, DeviceStatus, Stats } from "@/lib/types";
+import type { AuditDecision, AuditTargetType } from "@/lib/types";
 
 export async function GET() {
   const session = await getSession();
@@ -54,8 +55,25 @@ export async function GET() {
       failed24h,
       refused24h,
     },
-    deviceList,
-    auditRecent,
+    deviceList: deviceList.map((d) => ({
+      id: d.id,
+      name: d.name,
+      status: d.status as DeviceStatus,
+      authorized: d.authorized,
+    })),
+    auditRecent: auditRecent.map((event) => ({
+      id: event.id,
+      actor: event.actor,
+      action: event.action,
+      targetType: event.targetType as AuditTargetType,
+      targetId: event.targetId,
+      decision: event.decision as AuditDecision,
+      detail: event.detail,
+      ip: event.ip,
+      // Sérialisation identique au JSON répondu (les routes Next.js convertissent
+      // les Date en chaînes ISO) : le contrat côté client est respecté.
+      createdAt: event.createdAt.toISOString(),
+    })),
   };
 
   return NextResponse.json(stats);

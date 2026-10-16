@@ -8,6 +8,9 @@ export type CommandStatus = "PENDING" | "RUNNING" | "SUCCESS" | "FAILED" | "REFU
 export type AuditDecision = "ALLOWED" | "DENIED" | "ERROR";
 export type AuditTargetType = "DEVICE" | "SESSION" | "COMMAND" | "SYSTEM";
 
+/** Mode d'exécution de la plateforme (voir src/lib/config.ts). */
+export type ArcMode = "simulation" | "production";
+
 export interface Device {
   id: string;
   name: string;

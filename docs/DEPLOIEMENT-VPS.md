@@ -46,18 +46,25 @@ Le prototype Next.js matérialise le **contrat d'API** (voir README). Le backend
 ## Déploiement de la console
 
 ```bash
-# Basculer Prisma en PostgreSQL (une seule fois avant le build)
-sed -i 's/provider = "sqlite"/provider = "postgresql"/' prisma/schema.prisma
+# Fichier d'environnement (JAMAIS committé) — modèle : deploy/env.vps.example
+cp deploy/env.vps.example .env && chmod 600 .env
+#   ARC_SESSION_SECRET=$(openssl rand -base64 48)
+#   POSTGRES_PASSWORD=$(openssl rand -base64 24)
 
-# Fichier d'environnement (JAMAIS committé)
-cat > .env <<'EOF'
-POSTGRES_PASSWORD=<mot-de-passe-fort-unique>
-EOF
-
+# Build (schéma PostgreSQL sélectionné par build-arg, sans édition manuelle)
+# + démarrage : migrations contrôlées à l'entrypoint (ARC_RUN_MIGRATIONS=1),
+#   JAMAIS de seed automatique.
 docker compose -f docker-compose.vps.yml up -d --build console db
+
+# Premier administrateur (one-shot, mot de passe généré affiché une fois)
+docker compose -f docker-compose.vps.yml run --rm console bun prisma/bootstrap-admin.ts
+
+# Vérification
+curl -s http://127.0.0.1:3000/health     # {"status":"ok"}
+bash deploy/smoke-test.sh                # 12 contrôles API
 ```
 
-La console écoute sur `127.0.0.1:3000` : exposer uniquement derrière Nginx (TLS + authentification) ou un tunnel, jamais directement sur Internet.
+La console écoute sur `127.0.0.1:3000` : exposer uniquement derrière Nginx (TLS, voir `deploy/nginx/android.aenews.online.conf` pour **android.aenews.online**) ou un tunnel, jamais directement sur Internet.
 
 ## Phase 05 — Validation et durcissement
 
@@ -74,8 +81,8 @@ La console écoute sur `127.0.0.1:3000` : exposer uniquement derrière Nginx (TL
 
 **Durcissement complémentaire :**
 
-- Changer les identifiants de démonstration (`admin / Arc@2024!`) dès la première connexion.
+- ✅ L'anti-bruteforce est implémenté côté console (5 échecs/15 min → 429) **et** une limite Nginx dédiée sur `/api/auth/login` (10/min) est préparée dans `deploy/nginx/`.
+- ✅ Aucun identifiant de démonstration en production : le seed refuse de s'exécuter (`ARC_MODE=production`) ; l'administrateur est créé par `prisma/bootstrap-admin.ts` (mot de passe ≥ 12 caractères ou généré fort, affiché une seule fois).
 - `POSTGRES_PASSWORD` fort et unique ; `.env` en `chmod 600` ; jamais dans Git.
-- Mises à jour automatiques de sécurité (`unattended-upgrades`) ; échec de login → alerte (rate-limit à prévoir côté FastAPI).
-- Sauvegardes : `pg_dump` quotidien chiffré + snapshot des volumes RustDesk (`arc-rustdesk-hbbs` contient les clés du serveur — indispensable pour conserver les IDs des appareils).
+- `unattended-upgrades` ; sauvegardes : `pg_dump` quotidien chiffré + snapshot des volumes RustDesk (`arc-rustdesk-hbbs` contient les clés du serveur — indispensable pour conserver les IDs des appareils).
 - TLS partout (Nginx + Let's Encrypt) ; considérer fail2ban sur le port SSH.
