@@ -115,10 +115,13 @@ services:
         max-file: "3"
 
 networks:
+  # Sous-réseaux /24 non chevauchants (172.17–172.31 déjà pris par les autres
+  # stacks du VPS — audit 2026-10-17). Un /16 engloberait les /24 voisins créés
+  # par le même compose → « Pool overlaps ». Un /24 (254 IP) est largement suffisant.
   arc-app-db:
     ipam:
       config:
-        - subnet: 172.32.0.0/16 # épinglé : les sous-réseaux 172.17–172.31 sont déjà pris par les autres stacks du VPS (audit 2026-10-17)
+        - subnet: 172.32.0.0/24
   arc-rustdesk-signal:
     ipam:
       config:
