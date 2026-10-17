@@ -17,6 +17,12 @@ RUN bun install --frozen-lockfile
 
 FROM oven/bun:1.2 AS builder
 WORKDIR /app
+# OpenSSL requis DÈS le build : sans lui, Prisma ne détecte pas libssl et
+# télécharge le moteur « openssl-1.1.x » au lieu de « debian-openssl-3.0.x »
+# → moteur introuvable à l'exécution (image bookworm).
+RUN apt-get update -qq \
+    && apt-get install -y -qq --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
 ARG ARC_SCHEMA=sqlite # sqlite | postgres
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .

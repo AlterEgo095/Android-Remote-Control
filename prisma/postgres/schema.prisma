@@ -3,7 +3,10 @@
 // Le build Docker sélectionne ce schéma avec --build-arg ARC_SCHEMA=postgres.
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // Cible explicite : l'image d'exécution est Debian bookworm (OpenSSL 3.0).
+  // Sans détection fiable sous Bun, Prisma risquait de produire le moteur 1.1.x.
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
