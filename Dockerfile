@@ -28,6 +28,11 @@ RUN if [ "$ARC_SCHEMA" = "postgres" ]; then \
 
 FROM oven/bun:1.2 AS runner
 WORKDIR /app
+# OpenSSL : requis par le moteur Prisma (détection libssl sinon « may not work
+# as expected »). ca-certificates pour les connexions TLS sortantes éventuelles.
+RUN apt-get update -qq \
+    && apt-get install -y -qq --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0
