@@ -12,7 +12,7 @@
 | 0.2 | DNS `android.aenews.online` | ✅ **Déjà en place** — proxifié Cloudflare (orange), IPs CF vérifiées, certificat edge Universal SSL valable jusqu'au 09/12/2026 |
 | 0.3 | Audit VPS lecture seule | ✅ **GO** — certificat origine à émettre (étape 6), rien d'autre |
 
-**Contexte serveur à garder en tête** (issues de l'audit) : ~80 conteneurs (dont **Mailcow en production — zone interdite**), Nginx hôte 1.24 avec ~40 sites, PM2 occupe `0.0.0.0:3000`, `market-nginx`/`wedding-nginx` crash-loopent déjà (ne pas toucher). Vérification non-régression après chaque étape : `nginx -t` vert + 2–3 domaines témoins toujours en 200 (ex. `curl -sI https://iahub.aenews.store`, `https://neurolearn.aenews.net`).
+**Contexte serveur à garder en tête** (issues de l'audit) : ~80 conteneurs (dont **Mailcow en production — zone interdite**), Nginx hôte 1.24 avec ~40 sites, PM2 occupe `0.0.0.0:3000`, `market-nginx`/`wedding-nginx` crash-loopent déjà (ne pas toucher). Vérification non-régression après chaque étape : `nginx -t` vert + app PM2 `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/` toujours en 200 + nombre de conteneurs inchangé. NB (2026-10-17) : les domaines aenews.* ne résolvent plus depuis le VPS (DNS morts) — ne pas les utiliser comme témoins externes.
 
 ## 1. Sur le VPS — préparation (sans impact sur les autres apps)
 
@@ -105,7 +105,7 @@ sudo nginx -t && sudo systemctl reload nginx
 ```
 (Le mode SSL Cloudflare doit alors être **Full (strict)** — vérifier dans le dashboard.)
 
-**Contrôles (communs)** : `curl -sI https://android.aenews.online/health` → 200 ; `curl -sI http://android.aenews.online/` → 301 HTTPS ; domaines témoins intacts (`https://iahub.aenews.store`, `https://neurolearn.aenews.net` → 200/301) ; `nginx -t` vert.
+**Contrôles (communs)** : `curl -sI https://android.aenews.online/health` → 200 ; `curl -sI http://android.aenews.online/` → 301 HTTPS ; `nginx -t` vert ; app PM2 (127.0.0.1:3000) toujours en 200 ; conteneurs inchangés.
 **Retour arrière** : retirer le symlink + `nginx -t && systemctl reload nginx` (aucun autre site touché).
 
 ## 7. Validation finale (critères d'acceptation)

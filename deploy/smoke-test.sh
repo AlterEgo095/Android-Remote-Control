@@ -22,6 +22,14 @@ check() { # $1 nom, $2 attendu, $3 réel
 # T1 : /health
 check "/health → 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/health")"
 
+# Mode détecté (production = aucune session/commande fabricable → 503 honnête)
+MODE="$(curl -s "$BASE_URL/api/system/config" | sed -n 's/.*"mode":"\([a-z]*\)".*/\1/p')"
+MODE="${MODE:-simulation}"
+echo "Mode détecté : $MODE"
+# Comportements attendus pour la fabrication (simulation = validation 400 ;
+# production = refus honnête 503 AVANT validation, garantie plus forte).
+if [ "$MODE" = "production" ]; then EXP_FABRICATION=503; else EXP_FABRICATION=400; fi
+
 # T2 : accès protégé sans session
 check "GET /api/devices sans session → 401" "401" "$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/devices")"
 
@@ -39,10 +47,10 @@ if [ "$CODE" = "429" ]; then echo "WARN — rate-limit déclenché par T3 (atten
   check "GET /api/devices avec session → 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" "$BASE_URL/api/devices")"
   # T7 : registre
   check "GET /api/commands/registry → 200" "200" "$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" "$BASE_URL/api/commands/registry")"
-  # T8 : commande hors registre
-  check "commande hors registre → 400" "400" "$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -H 'Content-Type: application/json' -d '{"deviceId":"x","name":"FORMAT_DISK"}' "$BASE_URL/api/commands")"
-  # T9 : payload invalide (TEXT_INPUT vide)
-  check "TEXT_INPUT payload invalide → 400" "400" "$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -H 'Content-Type: application/json' -d '{"deviceId":"x","name":"TEXT_INPUT","payload":{"text":""}}' "$BASE_URL/api/commands")"
+  # T8 : commande hors registre (en production : refus 503 avant toute validation)
+  check "commande hors registre → $EXP_FABRICATION ($MODE)" "$EXP_FABRICATION" "$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -H 'Content-Type: application/json' -d '{"deviceId":"x","name":"FORMAT_DISK"}' "$BASE_URL/api/commands")"
+  # T9 : payload invalide (TEXT_INPUT vide) — même garde-fou en production
+  check "TEXT_INPUT payload invalide → $EXP_FABRICATION ($MODE)" "$EXP_FABRICATION" "$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -H 'Content-Type: application/json' -d '{"deviceId":"x","name":"TEXT_INPUT","payload":{"text":""}}' "$BASE_URL/api/commands")"
   # T10 : filtre d'audit invalide
   check "audit decision invalide → 400" "400" "$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" "$BASE_URL/api/audit?decision=PIRATE")"
   # T11 : filtre d'audit valide
