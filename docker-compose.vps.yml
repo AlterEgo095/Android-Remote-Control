@@ -29,7 +29,7 @@ services:
       ARC_RUN_MIGRATIONS: "1"
       DATABASE_URL: postgresql://arc:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant dans .env}@db:5432/android_remote_control
     ports:
-      - "127.0.0.1:3000:3000" # uniquement l'interface locale : Nginx proxifie
+      - "127.0.0.1:3260:3000" # uniquement l'interface locale : Nginx proxifie (3000 déjà pris par une app PM2 sur le VPS — audit 2026-10-17)
     healthcheck:
       test: ["CMD", "bun", "-e", "const r = await fetch('http://127.0.0.1:3000/health'); if (!r.ok) process.exit(1);"]
       interval: 30s
@@ -115,9 +115,18 @@ services:
         max-file: "3"
 
 networks:
-  arc-app-db: {}
-  arc-rustdesk-signal: {}
-  arc-rustdesk-relais: {}
+  arc-app-db:
+    ipam:
+      config:
+        - subnet: 172.32.0.0/16 # épinglé : les sous-réseaux 172.17–172.31 sont déjà pris par les autres stacks du VPS (audit 2026-10-17)
+  arc-rustdesk-signal:
+    ipam:
+      config:
+        - subnet: 172.32.1.0/24
+  arc-rustdesk-relais:
+    ipam:
+      config:
+        - subnet: 172.32.2.0/24
 
 volumes:
   arc-pgdata: {}

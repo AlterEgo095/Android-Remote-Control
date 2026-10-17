@@ -3,13 +3,13 @@
 # Android Remote Control — TESTS DE FUMÉE API (après déploiement)
 # Usage :
 #   BASE_URL=https://android.aenews.online ARC_USER=... ARC_PASS=... bash deploy/smoke-test.sh
-#   (par défaut : BASE_URL=http://127.0.0.1:3000, admin/Arc@2024! en simulation)
+#   (par défaut : BASE_URL=http://127.0.0.1:3260 — port VPS choisi après audit 2026-10-17)
 # Vérifie : santé, auth (KO/OK), 401 sans session, rate-limit, CSRF origin,
 # registre, refus de payload invalide, filtres d'audit stricts.
 # Sortie : PASS/FAIL par test ; code retour non nul si un test échoue.
 # ============================================================================
 set -u
-BASE_URL="${BASE_URL:-http://127.0.0.1:3000}"
+BASE_URL="${BASE_URL:-http://127.0.0.1:3260}"
 ARC_USER="${ARC_USER:-admin}"
 ARC_PASS="${ARC_PASS:-Arc@2024!}"
 JAR="$(mktemp)"
