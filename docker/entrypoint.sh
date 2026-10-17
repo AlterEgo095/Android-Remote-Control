@@ -1,5 +1,8 @@
 #!/bin/sh
 # Android Remote Control — point d'entrée du conteneur console (production)
+# 0. Commande one-shot : si des arguments sont passés (ex. `docker compose run
+#    --rm console bun prisma/bootstrap-admin.ts`), ils sont exécutés tels quels
+#    SANS migrations ni serveur — le conteneur sert alors de boîte à outils.
 # 1. Migrations Prisma contrôlées : UNIQUEMENT si ARC_RUN_MIGRATIONS=1
 #    (le seed de démonstration n'est JAMAIS exécuté ici — voir prisma/seed.ts).
 # 2. Démarrage du serveur Next.js standalone.
@@ -10,6 +13,11 @@ set -e
 SCHEMA="prisma/schema.prisma"
 if [ "${ARC_DB_SCHEMA:-sqlite}" = "postgres" ]; then
   SCHEMA="prisma/postgres/schema.prisma"
+fi
+
+# Commande one-shot : exécution directe, ni migration ni serveur.
+if [ "$#" -gt 0 ]; then
+  exec "$@"
 fi
 
 if [ "${ARC_RUN_MIGRATIONS:-0}" = "1" ]; then
