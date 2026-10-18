@@ -75,10 +75,14 @@ services:
   # ——— RustDesk OSS : serveur de SIGNALISATION (hbbs) ———
   # NB : image épinglée ; vérifier la dernière 1.1.x au déploiement
   # (docker manifest inspect rustdesk/rustdesk-server:1.1.12).
+  # ARC_RELAY_ADDR (dans .env, jamais dans le dépôt) = HÔTE PUBLIC DIRECT du relais,
+  # annoncé aux clients (le port :21117 est ajouté ici) : IP du VPS ou sous-domaine
+  # DNS-only (grey cloud). JAMAIS un domaine proxifié Cloudflare : CF ne relaie ni
+  # 21116/udp ni les ports 2111x — les clients RustDesk joignent l'origine directement.
   rustdesk-signalisation:
     image: rustdesk/rustdesk-server:1.1.12
     container_name: arc-rustdesk-hbbs
-    command: hbbs
+    command: hbbs -r ${ARC_RELAY_ADDR:?ARC_RELAY_ADDR manquant dans .env (hote seul, ex : 203.0.113.10)}:21117
     ports:
       - "21115:21115/tcp" # test de disponibilité
       - "21116:21116/tcp" # hole punching / ID
